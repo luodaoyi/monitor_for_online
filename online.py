@@ -1,99 +1,75 @@
-# -*- coding: utf-8 -*-
-import re
+# coding:utf-8
 import time
-import requests
 from datetime import datetime
+import requests
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
 
-
-prices = ['6.99', '16.99', '19.99']
-check_interval = 60
+## 需要监控的价格
+prices = ['6.99','16.99', '19.99','15.99'] #15.99不是特价款 
+# 通知的server酱的key  https://sc.ftqq.com 这里注册 然后去用微信扫描生成一个key就行了
 keys = [
-    '你的Server酱的key',
-    '其他的Server酱的key',
+    'xxxxxxx',
 ]
-timeout = 20
+# 检查间隔
+check_interval = 60
+# 服务器列表订购列表
+url = "https://console.online.net/en/order/server"
 notified = {}
-notice_times = 5
-driver = None
+## 通知次数
+notice_times = 50
+timeout = 20
 
-
-def check_special_offer():
-    try:
-        if not driver:
-            start_driver()
-        driver.get('https://www.online.net/en/summer-2017/sales')
-        sid = driver.find_elements_by_name('server_offer')[0]
-        driver.execute_script("arguments[0].setAttribute('value','10010')", sid)
-        sid.submit()
-        html = driver.page_source
-        soup = BeautifulSoup(html, 'html.parser')
-        trs = soup.find_all('tr')
-        for tr in trs:
-            tds = tr.find_all('td')
-            if tds and tds[-1].find('form'):
-                tds_text = [td.text for td in tds]
-                price = tds_text[-2].replace(' € pre-tax', '').strip()
-                details = '\n\n'.join(tds_text[:-1])
-                if price in prices:
-                    if notified.get(price, 0) < notice_times:
-                        send_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        text = '{}O有货啦'.format(price)
-                        desp = details + '\n\n' + send_time
-                        notified[price] = notified.get(price, 0) + 1
-                        print('{}O有货了，第{}次通知'.format(price, notified[price]))
-                        for key in keys:
-                            send_message(key, text, desp)
-                            time.sleep(1)
-                    else:
-                        print('{}O的相关信息超过最大通知次数，不再微信通知...'.format(price))
-                else:
-                    notified.setdefault(price, 0)
-    except Exception as e:
-        print(e)
-        pass
-            
-
-def send_message(key, text, desp = ''):
-    url = 'https://sc.ftqq.com/{}.send'.format(key)
+# 获得购买页面
+def get_page():
+    with requests.get(url) as resp:
+        return resp.content
+# 发送消息通知
+def send_message(key, text, desp=''):
+    url = f"https://sc.ftqq.com/{key}.send"
     data = {
         'text': text,
         'desp': desp
     }
-    r = requests.post(url, data = data, timeout = timeout)
-
-
-def start_driver():
-    global driver
-    chromeOptions = webdriver.ChromeOptions()
-    prefs = {
-        "profile.managed_default_content_settings.images": 2,
-        'profile.managed_default_content_settings.javascript': 2
-    }
-    chromeOptions.add_experimental_option("prefs", prefs)
-    driver = webdriver.Chrome(chrome_options = chromeOptions)
-    # service_args=[]
-    # service_args.append('--load-images=no')  ##关闭图片加载
-    # service_args.append('--disk-cache=yes')  ##开启缓存
-    # service_args.append('--ignore-ssl-errors=true') ##忽略https错误
-    # service_args.append('--ignore-ssl-errors=true')
-    # service_args.append('--ssl-protocol=TLSv1')
-    # cap = webdriver.DesiredCapabilities.PHANTOMJS
-    # cap["phantomjs.page.settings.javascriptEnabled"] = False
-    # driver = webdriver.PhantomJS(desired_capabilities = cap, service_args = service_args)
-    driver.implicitly_wait(timeout)
-    driver.set_page_load_timeout(timeout)
-
-
+    requests.post(url, data=data, timeout=timeout)
+# 检查每条数据是不是有货
+def check_server(tr):
+    tds = tr.find_all('td')
+    if tds and tds[-1].find('form'): #有form就是有货啊
+        tds_text = [td.text for td in tds]
+        price = tds_text[-2].replace(' € pre-tax', '').strip()
+        details = '\n\n'.join(tds_text[:-1]) 
+        if price in prices:
+            if notified.get(price, 0) < notice_times:
+                send_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                text = f"{price}O有货啦"
+                desp = details + '\n\n 监控时间:   ' + send_time + '\n\n 购买地址:   ' + url
+                notified[price] = notified.get(price, 0) + 1
+                print(f"{price}O有货了，第{notified[price]}次通知")
+                for key in keys:
+                    send_message(key, text, desp)
+                    time.sleep(1)
+            else:
+                print(f'{price}O的相关信息超过最大通知次数，不再微信通知...')
+        else:
+            notified.setdefault(price, 0)
+# 跑脚本
+def run():
+    content = get_page()
+    if not content:
+        print('没有返回任何内容')
+        return
+    soup = BeautifulSoup(content, 'html.parser')
+    trs = soup.find_all('tr')
+    for tr in trs:
+        check_server(tr)
 
 
 def main():
     while True:
         try:
-            check_special_offer()
-            print('{}秒后再次检查,当前时间: {}'.format(check_interval, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            run()
+            print(
+                f"{check_interval}秒后再次检查,当前时间: { datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             time.sleep(check_interval)
         except Exception as e:
             print(e)
