@@ -15,7 +15,7 @@ def send_message(text, desp):
 def check_server(id):
     url = f'https://www.kimsufi.com/en/order/kimsufi.cgi?hard={id}'
     with requests.get(url) as resp:
-        if 'icon-availability' in resp.content:
+        if resp.content.find('icon-availability'):
             return True
     return False
 
